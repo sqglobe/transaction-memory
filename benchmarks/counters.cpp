@@ -1,41 +1,65 @@
-#include <benchmark/benchmark.h>
 #include "alternatives.h"
 #include "transactional.h"
+#include <benchmark/benchmark.h>
+#include <future>
+#include <numeric>
+#include <thread>
+#include <vector>
 
-long alternative_counter() {
-    long var = 0;
-    auto counter = alternatives::Counter{};
-    for(int i = 0; i < 1000; ++i){
-        var += counter.count();
-    }
-    return var;
+constexpr std::size_t ThreadsNumber = 50;
+
+void count(auto &counter, int iterations) {
+  long var = 0;
+  for (int i = 0; i < iterations; ++i) {
+    var += counter.count();
+  }
+  // Prevent loop optimisation
+  benchmark::DoNotOptimize(var);
 }
 
-long transactional_counter() {
-    long var = 0;
+void count_multithreaded(auto &counter, int iterations,
+                         std::size_t threadsNumber) {
+  std::vector<std::jthread> threads;
+  for (std::size_t i = 0; i < threadsNumber; ++i) {
+    auto task = std::packaged_task<long()>();
+    threads.emplace_back(
+        [&counter, iterations] { count(counter, iterations); });
+  }
+}
+
+void transactional_multithread_counter_benchmark(benchmark::State &state) {
+  for (auto _ : state) {
     auto counter = transactional::Counter{};
-    for(int i = 0; i < 1000; ++i){
-        var += counter.count();
-    }
-    return var;
+
+    count_multithreaded(counter, 1000, ThreadsNumber);
+  }
 }
 
-void transactional_counter_benchmark(benchmark::State &state) {
-    for (auto _ : state) {
-        const auto res = transactional_counter();
-        // Prevent loop optimisation
-        benchmark::DoNotOptimize(res);
-    }
+void alternative_multithread_counter_benchmark(benchmark::State &state) {
+  for (auto _ : state) {
+    auto counter = alternatives::Counter{};
+
+    count_multithreaded(counter, 1000, ThreadsNumber);
+  }
 }
 
-void alternative_counter_benchmark(benchmark::State &state) {
-    for (auto _ : state) {
-        const auto res = alternative_counter();
-        // Prevent loop optimisation
-        benchmark::DoNotOptimize(res);
-    }
+void transactional_single_thread_counter_benchmark(benchmark::State &state) {
+  for (auto _ : state) {
+    auto counter = transactional::Counter{};
+    count(counter, 1000);
+  }
 }
 
-BENCHMARK(transactional_counter_benchmark);
-BENCHMARK(alternative_counter_benchmark);
+void alternative_single_thread_counter_benchmark(benchmark::State &state) {
+  for (auto _ : state) {
+    auto counter = alternatives::Counter{};
+    count(counter, 1000);
+  }
+}
+
+BENCHMARK(transactional_single_thread_counter_benchmark);
+BENCHMARK(alternative_single_thread_counter_benchmark);
+
+BENCHMARK(transactional_multithread_counter_benchmark);
+BENCHMARK(alternative_multithread_counter_benchmark);
 BENCHMARK_MAIN();
